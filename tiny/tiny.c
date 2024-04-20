@@ -19,7 +19,7 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg,
 
 // port 번호를 인자로 받아서 클라이언트에 요청이 들어 올때마다 새로운 연결 소켓을 만들어서 doit 함수 호출
 int main(int argc, char **argv) {
-  int listenfd, connfd;
+  int listenfd, connfd; // 듣기 식별자, 연결 식별자
   char hostname[MAXLINE], port[MAXLINE];
   socklen_t clientlen;
   struct sockaddr_storage clientaddr; // 클라이언트 연결 요청 후에 클라이언트 연결 소켓주소
@@ -32,10 +32,12 @@ int main(int argc, char **argv) {
   listenfd = Open_listenfd(argv[1]); // 듣기 소켓을 오픈 (해당 포트 번호에 해당하는)
   while (1) { // 클라이언트한테 받은 연결 요청을 accept (무한 루프)
     clientlen = sizeof(clientaddr);
-    connfd = Accept(listenfd, (SA *)&clientaddr,
+    // clientfd, connfd 사이의 연결을 수립
+    connfd = Accept(listenfd, (SA *)&clientaddr, // 듣기식별자에 도달하기를 기다리고, 클라이언트 소켓 주소를 채우고, 연결 식별자를 리턴
                     &clientlen);  // line:netp:tiny:accept 반복적으로 연결 요청을 접수
+    
     Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE,
-                0); // hostname, port 반환
+                0); // hostname, port 반환 -> 서버가 클라이언트의 주소 정보를 알아내는 용도
     printf("Accepted connection from (%s, %s)\n", hostname, port);
     doit(connfd);   // line:netp:tiny:doi 트랜잭션 수행
     Close(connfd);  // line:netp:tiny:close 자신과의 연결 끊음(서버 연결 식별자 닫음)
@@ -51,7 +53,7 @@ void doit(int fd) {
   rio_t rio;
 
   // 클라이언트가 rio로 보낸 요청라인, 헤더를 읽고 분석
-  Rio_readinitb(&rio,fd); // connfd를 연결하여 rio에 저장
+  Rio_readinitb(&rio,fd); // connfd를 연결하여 rio에 저장 (한개의 빈 버퍼를 설정하고, 이 버퍼와 한 개의 오픈한 파일 식별자를 연결)
   Rio_readlineb(&rio,buf,MAXLINE); // rio에 있는 str을 모두 버퍼에 옮김
   printf("Request headers: \n"); 
   printf("%s",buf); // GET: gozilla.gif
@@ -72,8 +74,8 @@ void doit(int fd) {
     return;
   }
 
-  if(is_static) {
-    if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) 
+  if(is_static) { // st_mode는 파일권한 비트와 파일 타입 모두를 인코딩하고 있음
+    if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) // 일반파일인지, 읽기 권한이 있는지  
     {
       clienterror(fd,filename,"403","Forbidden","Tiny couldn't read the file");
       return;
@@ -201,7 +203,7 @@ void serve_dynamic(int fd, char *filename, char *cgiargs) {
 
   /* Return first part of HTTP response */
   sprintf(buf, "HTTP/1.0 200 OK\r\n");
-  Rio_writen(fd, buf, strlen(buf));
+  Rio_writen(fd, buf, strlen(buf)); // 지정된 바이트 수(n)을 fd로 성공적으로 전송하거나 오류가 발생할 때까지 반복적으로 시도 (실제로 쓰인 바이트 수를 반환)
   sprintf(buf, "Server: Tiny Web Server\r\n");
   Rio_writen(fd, buf, strlen(buf));
 
@@ -210,11 +212,10 @@ void serve_dynamic(int fd, char *filename, char *cgiargs) {
   setenv("QUERY_STRING", cgiargs, 1);// execve를 호출하기 전 자식프로세스는 cgi 환경변수 쿼리스트링을 설정하고 
   // method를 cgi-bin/adder.c에 넘겨주기 위해 환경변수 set
   //setenv("REQUEST_METHOD", method, 1);
-  Dup2(fd, STDOUT_FILENO); // CGI 프로세스 출력을 fd로 복사, 실행 후 STDOUT 의 값은 fd이다. 클라이언트와 연계된 연결 식별자로 재지정
+  Dup2(fd, STDOUT_FILENO); // CGI 프로세스 출력을 fd로 복사(표준 출력을 fd로 재지정), 실행 후 STDOUT 의 값은 fd이다. fd가 기리키는 파일로 전송됨 
   Execve(filename, emptylist, environ); // 파일 이름이 첫번째 인자인 것과 같은 파일을 실행
   // /cgi-bin/adder 프로그램을 자식의 컨텍스트에서 실행
   } 
-  Wait(NULL); // 신호를 보내면 부모의 wait이 끝남
-
-  
+  Wait(NULL); // 자식프로세스가 완전히 실행을 마치고 종료될 때까지 부모 프로세스의 실행을 일시중
+ 
 }
