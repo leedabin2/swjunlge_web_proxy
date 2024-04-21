@@ -46,29 +46,33 @@ int main(int argc, char **argv) {
 
 // 한 개의 HTTP 트랜잭션을 처리한다.(서버가 클라로부터 하나의 http요청과 응답을 처리한다)
 void doit(int fd) {
+  // 변수 선언 및 초기화 
   int is_static; // 정적인지 아닌지 판단하는 변수
   struct stat sbuf; // 파일에 대한 정보를 가지는 구조체
-  char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-  char filename[MAXLINE], cgiargs[MAXLINE];
-  rio_t rio;
+  char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE]; // 클라이언트로부터 받은 요청라인을 저장하는 문자열 배열
+  char filename[MAXLINE], cgiargs[MAXLINE]; // 요청된 uri를 분석한 결과를 저장하는 문자열 배열(요청된 파일 이름, CGI실행 시 필요한 인자)
+  rio_t rio; // rio 패키지를 사용하기 위한 구조체, 네트워크 통신을 위해 사용
 
-  // 클라이언트가 rio로 보낸 요청라인, 헤더를 읽고 분석
-  Rio_readinitb(&rio,fd); // connfd를 연결하여 rio에 저장 (한개의 빈 버퍼를 설정하고, 이 버퍼와 한 개의 오픈한 파일 식별자를 연결)
-  Rio_readlineb(&rio,buf,MAXLINE); // rio에 있는 str을 모두 버퍼에 옮김
+  // 클라이언트 요청읽기 : rio로 보낸 요청라인, 헤더를 읽고 분석
+  Rio_readinitb(&rio,fd); // rio 버퍼를 초기화하고 파일 디스크립터(fd)와 연결 (한개의 빈 버퍼를 설정하고, 이 버퍼와 한 개의 오픈한 파일 식별자를 연결)
+  Rio_readlineb(&rio,buf,MAXLINE); // 클라이언트로부터 요청 라인을 읽어서 buf에 저장
   printf("Request headers: \n"); 
   printf("%s",buf); // GET: gozilla.gif
-  sscanf(buf,"%s %s %s", method, uri, version); 
+  sscanf(buf,"%s %s %s", method, uri, version); // 요청 라인에서 메소드, uri, 버전을 분리하여 저장
 
-  // GET 방식이나 HEAD 방식이 아니면, 에러로 연결
+  // HTTP 메소드 검사 : GET 방식이나 HEAD 방식이 아니면, 에러로 연결
   if (!(strcasecmp(method,"GET") == 0 || strcasecmp(method, "HEAD") ==0)) {
     clienterror(fd,method,"501","Not implemented", "Tiny does not implement this method");
     return;
   }
 
+  // 요청 헤더 읽기
   read_requesthdrs(&rio); // GET 메서드를 읽어들임
 
+  // uri 분석, 요청이 정적인지 동적 내용 요청인지를 결정하여 변수에 저장
   is_static = parse_uri(uri,filename,cgiargs);
 
+  // 요청된 파일의 정보 읽기
   if(stat(filename, &sbuf) < 0) { // filename 유효성 검사
     clienterror(fd,filename,"404","Not found","Tiny couldn't find this file");
     return;
@@ -87,7 +91,7 @@ void doit(int fd) {
       clienterror(fd,filename,"403","Forbidden","Tiny couldn't run the CGI program");
       return;
     }
-    serve_dynamic(fd,filename,cgiargs); // 동적 클래스를 클라이언트에게 제공
+    serve_dynamic(fd,filename,cgiargs); // CGI 프로그램 실행 한 뒤 결과를 클라이언트에게 전송
   }
 }
 
@@ -115,14 +119,14 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longms
   Rio_writen(fd, body, strlen(body));  
 }
 
-// Tiny 는 요청 헤더 내의 어떤 정보도 사용하지 않음 (요청헤더를 읽고 무시함)
-void read_requesthdrs(rio_t *rp) {
-  char buf[MAXLINE];
+// HTTP 요청의 헤더를 읽고, 출력하는 기능을 수행 (클라이언트로 부터 받은 요청의 헤더를 읽지만, 실질적으로 처리하지 않음)
+void read_requesthdrs(rio_t *rp) { // 네트워크 통신에서 버퍼링된 입출력을 다루기 위함
+  char buf[MAXLINE]; // 요청 헤더의 각 라인을 저장하기 위한 문자 배열
 
-  Rio_readlineb(rp,buf,MAXLINE);
-  while (strcmp(buf,"\r\n"))
+  Rio_readlineb(rp,buf,MAXLINE); // rp 가 가리키는 입력 스트림에서 한 줄을 읽어 buf에 저장
+  while (strcmp(buf,"\r\n")) // 헤더의 끝을 만날 때까지 반복 읽기 (빈줄을 만나면 헤더 읽기 멈춤)
   {
-    Rio_readlineb(rp,buf,MAXLINE);
+    Rio_readlineb(rp,buf,MAXLINE); // 추가적인 헤더라인 읽기
     printf("%s",buf);
   }
   return;
@@ -207,12 +211,13 @@ void serve_dynamic(int fd, char *filename, char *cgiargs) {
   sprintf(buf, "Server: Tiny Web Server\r\n");
   Rio_writen(fd, buf, strlen(buf));
 
+  // 서버가 GET /cgi-bin/adder HTTP/1.1 와 같은 요청을 받으면 하는 일
   if (Fork() == 0) { // 자식 프로세스를 생성
   /* Real server would set all CGI vars here */
-  setenv("QUERY_STRING", cgiargs, 1);// execve를 호출하기 전 자식프로세스는 cgi 환경변수 쿼리스트링을 설정하고 
-  // method를 cgi-bin/adder.c에 넘겨주기 위해 환경변수 set
+  setenv("QUERY_STRING", cgiargs, 1);// 자식프로세스 : execve를 호출하기 전 자식프로세스는 cgi 환경변수 쿼리스트링을 설정하고 
+  // method를 cgi-bin/adder.c에 넘겨주기 위해 환경변수 set(인자를 서버에 넘겨 준다?)
   //setenv("REQUEST_METHOD", method, 1);
-  Dup2(fd, STDOUT_FILENO); // CGI 프로세스 출력을 fd로 복사(표준 출력을 fd로 재지정), 실행 후 STDOUT 의 값은 fd이다. fd가 기리키는 파일로 전송됨 
+  Dup2(fd, STDOUT_FILENO); // CGI 프로세스 출력을 fd로 복사(표준 출력을 fd(클아이언트와 연계된 연결 식별자로 재지정), 따라서 표준 출력으로 쓰는 모든 것은 클라이언트로 직접 감
   Execve(filename, emptylist, environ); // 파일 이름이 첫번째 인자인 것과 같은 파일을 실행
   // /cgi-bin/adder 프로그램을 자식의 컨텍스트에서 실행
   } 
