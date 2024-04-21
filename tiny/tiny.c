@@ -98,23 +98,24 @@ void doit(int fd) {
 
 // HTTP 응답을 응답 라인에 적절한 상태코드와 상태메시지와 함께 클라이언트에 보냄
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg) {
-  char buf[MAXLINE], body[MAXBUF];
+  char buf[MAXLINE], body[MAXBUF]; // buf는 HTTP 응답 헤더를 구성, body는 HTML 형식의 응답 본문을 저장
 
   // HTML 형식 response body
   sprintf(body,"<html><title>Tiny Error</title>");
   sprintf(body,"%s<body bgcolor=""ffffff"">\r\n",body);
   sprintf(body,"%s%s: %s\r\n",body,errnum,shortmsg);
   sprintf(body,"%s<p>%s: %s\r\n",body,longmsg,cause);
-  sprintf(body,"%s<hr><em>The Tiny Web server</em>\r\n",body);
+  sprintf(body,"%s<hr><em>The Tny Web server</em>\r\n",body);
 
   // response 쓰기
   sprintf(buf,"HTTP/1.0 %s %s\r\n",errnum,shortmsg);
-  Rio_writen(fd,buf,strlen(buf));
+  Rio_writen(fd,buf,strlen(buf)); // 클라와 연결된 소켓 파일 디스크립터 fd에 응답라인을 클라에게 전송
   sprintf(buf,"Content-type: text/html\r\n");
   Rio_writen(fd,buf,strlen(buf));
   sprintf(buf,"Content-length: %d\r\n\r\n",(int)strlen(body));
 
-  // 에러 메시지와 응답을 서버 소켓을 통해 클라이언트에게 보
+  // 에러 메시지와 응답을 서버 소켓을 통해 클라이언트에게 보냄
+  // 구성한 Content-Length 헤더와 HTML 형식의 응답 본문을 클라이언트에게 전송
   Rio_writen(fd, buf, strlen(buf));
   Rio_writen(fd, body, strlen(body));  
 }
