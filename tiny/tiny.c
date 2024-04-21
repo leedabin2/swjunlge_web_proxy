@@ -133,30 +133,30 @@ void read_requesthdrs(rio_t *rp) { // 네트워크 통신에서 버퍼링된 입
   return;
 }
 
-// uri를 받아 요청받은 filename, cgiargs를 반
+// uri를 분석하여 요청된 자원이 정적, 동적 컨텐츠인지 판단 후 파일 이름과 CGI 인자를 추출함
 int parse_uri(char *uri, char *filename, char *cgiargs ) {
-  char *ptr;
+  char *ptr; // uri 내 특정 위치를 가리킴
 
-  if (!strstr(uri,"cgi-bin")) { // 정적 컨텐츠
-    strcpy(cgiargs,"");
-    strcpy(filename,".");
-    strcat(filename, uri);
-    if (uri[strlen(uri)-1] == '/')
+  if (!strstr(uri,"cgi-bin")) { // 정적 컨텐츠 : cgi-bin 문자열이 없는지 확인
+    strcpy(cgiargs,""); // CGI 인자 문자열을 빈문자열로 초기화
+    strcpy(filename,"."); // filename을 현재 디렉토리를 나타내는 . 으로 초기화
+    strcat(filename, uri); // filename 뒤에 uri 추가 : 요청된 uri에 해당하는 파일의 경로를 구
+    if (uri[strlen(uri)-1] == '/') // uri가 '/'로 끝나는 경우 'home.html"을 요청한 것으로 간주 
       strcat(filename,"home.html");
 
     return 1; 
   }
   else { // 동적 컨텐츠(cgi-bin은 동적 파일로 분류(과제요구사항))
     ptr = index(uri,"?");
-    if (ptr) { // ?가 있으면
-      strcpy(cgiargs,ptr+1); 
-      *ptr = '\0';
+    if (ptr) { // ?가 있으면 CGI 인자가 있음 
+      strcpy(cgiargs,ptr+1); // '?' 다음 문자부터 끝까지를 cgiargs에 복사 
+      *ptr = '\0'; // uri 문자열을 '?' 위치에서 분리하여 uri가 동적 컨텐츠 경로만 가리키도록 함
     }
     else {
       strcpy(cgiargs,"");
     }
     strcpy(filename,".");
-    strcat(filename,uri);
+    strcat(filename,uri); // filename 뒤에 수정된 uri를 추가
     return 0;
   } 
 }
