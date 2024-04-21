@@ -11,6 +11,8 @@ int main(void)
   char arg1[MAXLINE], arg2[MAXLINE], content[MAXLINE]; // 쿼리스트링에서 파싱한 두 인자 저장, content : HTTP 응답 본문을 구성하기 위한 문자열
   int n1=0, n2=0;
 
+  method = getenv("REQUEST_METHOD");
+  
   /* Extract the two arguments */
   if ((buf = getenv("QUERY_STRING")) != NULL) {
     p = strchr(buf, '&'); // 쿼리스트링을 읽어옴 &로 구분받아서 문자의 위치를 찾음
@@ -35,6 +37,7 @@ int main(void)
   if(strcasecmp(method, "GET") == 0) { 
     printf("%s", content);
   }
+  // printf("%s",content);
   fflush(stdout);
 
   exit(0);

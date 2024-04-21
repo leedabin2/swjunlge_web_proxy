@@ -11,21 +11,21 @@
 void doit(int fd);
 void read_requesthdrs(rio_t *rp);
 int parse_uri(char *uri, char *filename, char *cgiargs);
-void serve_static(int fd, char *filename, int filesize);
+void serve_static(int fd, char *filename, int filesize, char *method);
 void get_filetype(char *filename, char *filetype);
-void serve_dynamic(int fd, char *filename, char *cgiargs);
+void serve_dynamic(int fd, char *filename, char *cgiargs, char *method);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg,
                  char *longmsg);
 
 // port 번호를 인자로 받아서 클라이언트에 요청이 들어 올때마다 새로운 연결 소켓을 만들어서 doit 함수 호출
 int main(int argc, char **argv) {
-  int listenfd, connfd; // 듣기 식별자, 연결 식별자
+  int listenfd, connfd;  // 듣기 식별자, 연결 식별자
   char hostname[MAXLINE], port[MAXLINE];
   socklen_t clientlen;
   struct sockaddr_storage clientaddr; // 클라이언트 연결 요청 후에 클라이언트 연결 소켓주소
 
-  if (argc != 2) { // 명령줄 인수의 수가 맞지 않으면
-    fprintf(stderr, "usage: %s <port>\n", argv[0]); // 프로그램이름과, 포트 번호를 지정하라는 메시
+  if (argc != 2) {  // 명령줄 인수의 수가 맞지 않으면
+    fprintf(stderr, "usage: %s <port>\n", argv[0]);  // 프로그램이름과, 포트 번호를 지정하라는 메시
     exit(1); // 종료 코드
   }
 
@@ -84,17 +84,16 @@ void doit(int fd) {
       clienterror(fd,filename,"403","Forbidden","Tiny couldn't read the file");
       return;
     }
-    serve_static(fd,filename,sbuf.st_size);// 정적 컨텐츠를 클라이언트에게 제공
+    serve_static(fd,filename,sbuf.st_size,method);// 정적 컨텐츠를 클라이언트에게 제공
   } else {
     // 동적이라면 실행가능한지 검증
     if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR && sbuf.st_mode)) {
       clienterror(fd,filename,"403","Forbidden","Tiny couldn't run the CGI program");
       return;
     }
-    serve_dynamic(fd,filename,cgiargs); // CGI 프로그램 실행 한 뒤 결과를 클라이언트에게 전송
+    serve_dynamic(fd,filename,cgiargs,method); // CGI 프로그램 실행 한 뒤 결과를 클라이언트에게 전송
   }
 }
-
 
 // HTTP 응답을 응답 라인에 적절한 상태코드와 상태메시지와 함께 클라이언트에 보냄
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg) {
@@ -147,7 +146,7 @@ int parse_uri(char *uri, char *filename, char *cgiargs ) {
     return 1; 
   }
   else { // 동적 컨텐츠(cgi-bin은 동적 파일로 분류(과제요구사항))
-    ptr = index(uri,"?");
+    ptr = index(uri,'?'); // '?'를 찾아 ptr에 위치를 저장 
     if (ptr) { // ?가 있으면 CGI 인자가 있음 
       strcpy(cgiargs,ptr+1); // '?' 다음 문자부터 끝까지를 cgiargs에 복사 
       *ptr = '\0'; // uri 문자열을 '?' 위치에서 분리하여 uri가 동적 컨텐츠 경로만 가리키도록 함
@@ -161,14 +160,14 @@ int parse_uri(char *uri, char *filename, char *cgiargs ) {
   } 
 }
 
-// 클라이언트가 원하는 정적 컨텐츠를 받아옴
-// 응답 라인과 헤더를 작성 후 서버에 보내고, 정적 컨텐츠 파일을 읽어 응답을 클라에 보냄
-void serve_static(int fd, char *filename, int filesize) {
-  int srcfd;
+// 클라이언트에게 HTTP 응답 헤더를 보내고, 요청 받은 파일을 읽어서 클라에게 전송
+void serve_static(int fd, char *filename, int filesize, char *method) { // 클라이언트 연결 식별자, 요청 받은 파일이름, 파일 크기
+  
+  // 변수 선언 
+  int srcfd; // 요청 받은 파일을 열 때 사용하는 파일 식별자
+  char *srcp, filetype[MAXLINE], buf[MAXBUF]; // 메모리 매핑된 파일의 주소를 가리킬 포인터, MIME 타입을 저장할 배열, HTTP 응답 헤더를 구성하기 위한 버퍼5
 
-  char *srcp, filetype[MAXLINE], buf[MAXBUF];
-
-  get_filetype(filename,filetype);
+  get_filetype(filename,filetype); // 요청 받은 파일의 확장자 기반으로 MIME 타입을 결정하는 함수를 호출
   sprintf(buf, "HTTP/1.0 200 OK\r\n");
   sprintf(buf, "%sServer: Tiny Web Server\r\n", buf);
   sprintf(buf, "%sConnection: close\r\n", buf);
@@ -177,15 +176,22 @@ void serve_static(int fd, char *filename, int filesize) {
   Rio_writen(fd,buf,strlen(buf));
   printf("Response headers: \n");
   printf("%s", buf);
+  
+  // HEAD로 들어오면 body를 안 보내줌
+  if ( strcasecmp(method,"HEAD") == 0 ) 
+    return;
 
   // 클라에게 response body로 보내줌
   srcfd = Open(filename, O_RDONLY, 0);
 
   // mmap 함수는 요청한 파일을 가상메모리 영역으로 매핑
-  srcp = Mmap(0,filesize,PROT_READ, MAP_PRIVATE, srcfd, 0);
-  Close(srcfd);
+  //srcp = Mmap(0,filesize,PROT_READ, MAP_PRIVATE, srcfd, 0); // 파일의 내용을 직접 메모리에서 접근
+  srcp = (char *)malloc(filesize);
+  Rio_readn(srcfd,srcp,filesize);
+  Close(srcfd); // 파일식별자를 닫음
   Rio_writen(fd,srcp,filesize); // 주소 srcp에서 시작하는 filesize 바이트를 클라의 연결 식별자로 복
-  Munmap(srcp,filesize); 
+  //Munmap(srcp,filesize); // 사용이 끝난 메모리 매핑을 해제
+  free(srcp);
 }
 
 // filename을 조사해서 각각 식별자에 맞는 MIME타입을 filetype에 입
@@ -198,12 +204,14 @@ void get_filetype(char *filename, char *filetype) {
     strcpy(filetype,"image/png");
   else if (strstr(filename, ".jpg"))
     strcpy(filetype,"image/jpeg");
+  else if (strstr(filename,".mp4"))
+    strcpy(filetype, "video/mp4");
   else 
     strcpy(filetype,"text/plain");
 }
 
 // 동적 디렉토리를 받을 때, 응답라인과 헤더를 작성하고 서버에 보냄 
-void serve_dynamic(int fd, char *filename, char *cgiargs) {
+void serve_dynamic(int fd, char *filename, char *cgiargs, char *method) {
   char buf[MAXLINE], *emptylist[] = {NULL};
 
   /* Return first part of HTTP response */
@@ -217,7 +225,7 @@ void serve_dynamic(int fd, char *filename, char *cgiargs) {
   /* Real server would set all CGI vars here */
   setenv("QUERY_STRING", cgiargs, 1);// 자식프로세스 : execve를 호출하기 전 자식프로세스는 cgi 환경변수 쿼리스트링을 설정하고 
   // method를 cgi-bin/adder.c에 넘겨주기 위해 환경변수 set(인자를 서버에 넘겨 준다?)
-  //setenv("REQUEST_METHOD", method, 1);
+  setenv("REQUEST_METHOD", method, 1);
   Dup2(fd, STDOUT_FILENO); // CGI 프로세스 출력을 fd로 복사(표준 출력을 fd(클아이언트와 연계된 연결 식별자로 재지정), 따라서 표준 출력으로 쓰는 모든 것은 클라이언트로 직접 감
   Execve(filename, emptylist, environ); // 파일 이름이 첫번째 인자인 것과 같은 파일을 실행
   // /cgi-bin/adder 프로그램을 자식의 컨텍스트에서 실행
