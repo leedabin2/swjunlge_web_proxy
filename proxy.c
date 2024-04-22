@@ -63,16 +63,16 @@ void doit(int connfd) {
   int port;
   char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE]; // 클라이언트로부터 받은 요청라인을 저장
   char hostname[MAXLINE],path[MAXLINE];
-  char endserver_http_header[MAXLINE];
+  char endserver_http_header[MAXLINE]; // 서버에 보낼 요청 헤더 생성
 
   rio_t rio, server_rio; // 클라용 rio, 서버용 rio (네트워크 통신을 위함)
 
-  // 클라이언트 요청 읽기
+  // 클라이언트 요청 읽기(클라와의 fd를 클라용 rio에 연결)
   Rio_readinitb(&rio,connfd); 
   Rio_readlineb(&rio,buf,MAXLINE);
   printf("Request headers: \n"); 
   printf("%s",buf);
-  sscanf(buf,"%s %s %s", method, uri, version);  // 요청라인에서 메소드, uri, version 분리해서 저장\
+  sscanf(buf,"%s %s %s", method, uri, version);  // 요청라인에서 메소드, uri, version 분리해서 저장
 
   // HTTP 요청 검사 - GET이 아니면 에러 처리
   if (!(strcasecmp(method,"GET") == 0)) {
@@ -81,10 +81,10 @@ void doit(int connfd) {
     return;
   }
 
-  // uri를 분석해서 파싱하기
+  // uri를 분석해서 파싱하기(uri,호스트네임,목적지호스트, 포트)
   parse_uri(uri,hostname,path, &port); 
 
-  // 헤더 요청 읽기
+  // 헤더 요청 읽을 읽으면서 - 서버에 보낼 요청 헤더 생성
   read_request_header(endserver_http_header, hostname, path, port, &rio);
 
   // 서버로 전송
@@ -94,9 +94,11 @@ void doit(int connfd) {
     return;
   }
 
+  // 서버에 요청 메시지를 보냄 
   Rio_readinitb(&server_rio,end_serverfd);
   Rio_writen(end_serverfd,endserver_http_header,strlen(endserver_http_header)); // 데이터를 쓸 식별자, 데이터가 저장된 버퍼 주소, 버퍼에서 쓰는 데이터의 바이트 수
 
+  // 서버에서 응답이 오면 클라에게 전달
   size_t n;
   while ((n=Rio_readlineb(&server_rio,buf,MAXLINE)) != 0)
   {
@@ -104,7 +106,6 @@ void doit(int connfd) {
   }
   Close(end_serverfd);
   
-
 }
 
 // HTTP 요청 헤더를 읽음
@@ -112,18 +113,18 @@ void read_request_header(char *http_header, char *hostname, char *path, int port
   char buf[MAXLINE], request_hdr[MAXLINE], other_hdr[MAXLINE], host_hdr[MAXLINE];
 
   sprintf(request_hdr,requestlint_hdr_format,path); // request_hdr에 reqquestlint_hdr_format을 담음(path인자는 reqquestlint_hdr_format에 들어갈 값)
-  while (Rio_readlineb(client_rio,buf,MAXLINE) > 0)
+  while (Rio_readlineb(client_rio,buf,MAXLINE) > 0) // 읽어온 데이터가 존재하는 동안
   {
     if (strcmp(buf,"\r\n") == 0) // 끝까지 다 읽었다면 break
       break; 
 
-    // host header 값 만들기
-    if (!strncasecmp(buf,host_key,strlen(host_key))) {
-      strcpy(host_hdr,buf); // buf를 복사
+    // host header 값 만들기 : 항상 Host 헤더를 보냄
+    if (!strncasecmp(buf,host_key,strlen(host_key))) { // buf에서 host_key와 일치하는 문자열을 찾아내면 그 문자열을 host_hdr에 복사
+      strcpy(host_hdr,buf); // host_hdr에 buf를 복사
       continue;
     }
 
-    // host 외 헤더 만들기
+    // host 외 헤더 만들기 : 연결(connection), 프록시 연결(proxy-connection), 사용자 에이전트(user-agent) 헤더를 저장
     if(!strncasecmp(buf, connection_key, strlen(connection_key))
               &&!strncasecmp(buf, proxy_connection_key, strlen(proxy_connection_key))
               &&!strncasecmp(buf, user_agent_key, strlen(user_agent_key)))
@@ -132,6 +133,7 @@ void read_request_header(char *http_header, char *hostname, char *path, int port
       }
   }
   // 필수 헤더가 없다면 추가로 전송 (hostname으로 만들기)
+  // 클라이언트가 호스트 헤더를 제공하지 않은 경우), 서버에 대한 호스트 헤더를 생성하여 추가
   if (strlen(host_hdr) == 0 ) 
     sprintf(host_hdr,host_hdr_format,hostname);
 
@@ -152,24 +154,23 @@ inline int connect_endserver(char *hostname, int port){
 void parse_uri(char *uri,char *hostname,char *path, int *port)
 {
     *port = 80; // HTTP 기본 포트 80 (포트가 url에 포함 여부와 관계없이 작동해야함)
-    char* pos = strstr(uri, "//"); // "//" 의 시작 위치에 대한 포인터를 리턴함
-    printf("pos : %s", pos);
-    pos = pos != NULL ? pos+2 : uri;
-    printf("pos+2 : %s", pos);
 
-    char *pos2 = strstr(pos, ":");
+    char* pos = strstr(uri, "//"); // "//" 의 시작 위치에 대한 포인터를 리턴함
+    pos = pos != NULL ? pos+2 : uri; 
+    char *pos2 = strstr(pos, ":"); 
+
     if(pos2 != NULL) // 포트 번호가 있는 경우 
     {
         *pos2 = '\0'; // ':' 위치에서 분리 
-        sscanf(pos, "%s", hostname); // hostname 을 읽어옴 
-        sscanf(pos2+1, "%d%s", port, path); // 웹서버에 연결할 포트번호와 경로
+        sscanf(pos, "%s", hostname); // pos 문자열에서 공백이 나타기 전까지 읽어서 hostname 변수에 저장
+        sscanf(pos2+1, "%d%s", port, path); // portnum+1에서 시작하는 문자열에서 정수형(%d) 데이터와 문자열(%s) 데이터를 순서대로 읽어서 각각 port와 path 변수에 저장
     }
     else // 포트 번호가 없는 경우
     {
         pos2 = strstr(pos,"/");
         if(pos2!=NULL) // 경로가 있는 경우
         {
-            *pos2 = '\0';
+            *pos2 = '\0'; // '\' 위치에서 분리
             sscanf(pos,"%s",hostname);
             *pos2 = '/';
             sscanf(pos2,"%s",path);
