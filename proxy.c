@@ -1,9 +1,7 @@
 #include <stdio.h>
 #include "csapp.h"
 
-// 기본 시퀀셜 프록시 HTTP/1.0 GET 요청을 처리
-// http://www.cmu.edu/hub/index.html HTTP/1.1 으로 들어오면
-// 프록시 : GET /hub/index.html HTTP/1.0 으로 서버에게 요청 보냄
+// 스레드 프록시 서버
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
