@@ -35,7 +35,7 @@ int main(int argc, char **argv) {
   char hostname[MAXLINE], port[MAXLINE];  // 프록시가 요청을 받고 응답해줄 클라이언트의 IP, Port
   socklen_t clientlen;
   struct sockaddr_storage clientaddr; 
-  pthread_t tid;
+  pthread_t tid; // thread ID 를 저장하기 위함
 
   if (argc != 2) {  // 명령줄 인수의 수가 맞지 않으면
     fprintf(stderr, "usage: %s <port>\n", argv[0]);  // 프로그램이름과, 포트 번호를 지정하라는 메시
@@ -60,9 +60,9 @@ int main(int argc, char **argv) {
 }
 
 void *thread(void *vargp) {
-  int connfd = *((int *)vargp);
-  Pthread_detach(pthread_self());
-  Free(vargp);
+  int connfd = *((int *)vargp); // 피어쓰레드가 이 포인터를 역참조
+  Pthread_detach(pthread_self()); // 피어쓰레드는 요청을 처리하기 전에 자신을 분리 (다른 쓰레드에 의해서 청소되거나 종료될 수 없기 때문) 
+  Free(vargp); // 자신의 메모리 자원들이 종료 후 반환처리
   doit(connfd);
   Close(connfd);
   return NULL;
