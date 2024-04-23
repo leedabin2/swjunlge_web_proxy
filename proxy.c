@@ -26,13 +26,16 @@ void read_request_header(char *http_header, char *hostname, char *path, int port
 void parse_uri(char *uri, char *hostname, char *path, int *port);
 int connect_endserver(char *hostname,int port);
 
+void *thread(void *vargp);
+
 // 클라이언트로 요청이 들어오면 새로운 연결을 생성 후 원격 서버에 해당 요청을 전달
 int main(int argc, char **argv) {
 
-  int listenfd, connfd;
+  int listenfd, *connfd;
   char hostname[MAXLINE], port[MAXLINE];  // 프록시가 요청을 받고 응답해줄 클라이언트의 IP, Port
   socklen_t clientlen;
   struct sockaddr_storage clientaddr; 
+  pthread_t tid;
 
   if (argc != 2) {  // 명령줄 인수의 수가 맞지 않으면
     fprintf(stderr, "usage: %s <port>\n", argv[0]);  // 프로그램이름과, 포트 번호를 지정하라는 메시
@@ -42,18 +45,27 @@ int main(int argc, char **argv) {
   listenfd = Open_listenfd(argv[1]); // 듣기 소켓을 오픈 (해당 포트 번호에 해당하는)
 
   while (1) { // 클라이언트한테 받은 연결 요청을 accept (무한 루프)
-    clientlen = sizeof(clientaddr);
+    clientlen = sizeof(struct sockaddr_storage);
+    connfd = (int*)Malloc(sizeof(int)); // 여러개의 식별자를 만들기 위해서 덮어쓰지 못하게 고유 메모리를 생성
     // clientfd, connfd 사이의 연결을 수립
-    connfd = Accept(listenfd, (SA *)&clientaddr, // 듣기식별자에 도달하기를 기다리고, 클라이언트 소켓 주소를 채우고, 연결 식별자를 리턴
+    *connfd = Accept(listenfd, (SA *)&clientaddr, // 듣기식별자에 도달하기를 기다리고, 클라이언트 소켓 주소를 채우고, 연결 식별자를 리턴
                     &clientlen);  // line:netp:tiny:accept 반복적으로 연결 요청을 접수
     
     Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE,
                 0); // hostname, port 반환 -> 서버가 클라이언트의 주소 정보를 알아내는 용도
     printf("Accepted connection from (%s, %s)\n", hostname, port);
-    doit(connfd); // 프록시가 중계를 시작
-    Close(connfd); 
+    Pthread_create(&tid,NULL,thread,connfd);
   }
   return 0;
+}
+
+void *thread(void *vargp) {
+  int connfd = *((int *)vargp);
+  Pthread_detach(pthread_self());
+  Free(vargp);
+  doit(connfd);
+  Close(connfd);
+  return NULL;
 }
 
 // 클라이언트의 연결요청이 유효하면, 웹서버에 연결 설정
@@ -132,6 +144,7 @@ void read_request_header(char *http_header, char *hostname, char *path, int port
           strcat(other_hdr, buf);
       }
   }
+
   // 필수 헤더가 없다면 추가로 전송 (hostname으로 만들기)
   // 클라이언트가 호스트 헤더를 제공하지 않은 경우), 서버에 대한 호스트 헤더를 생성하여 추가
   if (strlen(host_hdr) == 0 ) 
@@ -141,7 +154,7 @@ void read_request_header(char *http_header, char *hostname, char *path, int port
   return;
 }
 
-inline int connect_endserver(char *hostname, int port){
+int connect_endserver(char *hostname, int port){
     char portStr[100];
     // portstr에 port 넣어주기
     sprintf(portStr, "%d", port);
@@ -180,7 +193,6 @@ void parse_uri(char *uri,char *hostname,char *path, int *port)
             sscanf(pos,"%s",hostname);
         }
     }
+    printf("---parse_uri host: %s, port: %ls, path: %s\n", hostname, port, path);
     return;
 }
-
-
