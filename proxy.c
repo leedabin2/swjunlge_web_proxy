@@ -1,14 +1,14 @@
 #include <stdio.h>
 #include "csapp.h"
 
-#define MAX_CACHE_SIZE 1049000
-#define MAX_OBJECT_SIZE 102400
+#define MAX_CACHE_SIZE 1049000 // 전체 프록시 캐시의 최대 크기
+#define MAX_OBJECT_SIZE 102400 // 최대 웹 객체 크기
 
-// 프록시 캐시
+/* 프록시 캐시 선언 변수 & 함수 */
 typedef struct cache_node
 {
   char *file_path; // 웹 객체 path
-  int content_length;
+  int content_length; 
   char *response;
   struct cache_node *prev, *next;
 } cache_node;
@@ -23,13 +23,11 @@ typedef struct cache
 struct cache *p; // root, tail을 전역으로 선언
 
 cache_node *insert_cache(cache *p, char *path, char *response_p, int content_length);
-cache_node *find_cache(cache *p, char *path);
-void move_cache(cache_node *node, cache *p); 
 void delete_cache(cache *p);
+cache_node *find_cache(cache *p, char *path);
+void add_cache(cache_node *node, cache *p);
 
-/* Recommended max cache and object sizes */
-#define MAX_CACHE_SIZE 1049000
-#define MAX_OBJECT_SIZE 102400
+/* ----------------------- */
 
 /* You won't lose style points for including this long line in your code */
 static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
@@ -96,32 +94,34 @@ void *thread(void *vargp) {
 }
 
 // 연결 리스트 생성
-cache_node *insert_cache(cache *p,char *path, char *response_p, int content_length) {
+cache_node *insert_cache(cache *p,char *path, char *response_p,int content_length) {
   // 새 노드 생성
-  cache_node *newnode = (cache_node *)malloc(sizeof(cache_node));
+  cache_node *newnode = malloc(sizeof(cache_node));
 
-  newnode->response = response_p;
   newnode->file_path = path;
+  newnode->response = response_p;
   newnode->content_length = content_length;
   newnode->prev = NULL;
   newnode->next = NULL;
 
-  if (content_length > MAX_OBJECT_SIZE) 
+  p->total_size += newnode->content_length;
+  // 들어온 값 > 캐시 웹 객체 크기 면 리턴
+  if (content_length > MAX_OBJECT_SIZE)
     return;
-  // 만약 들어오는 값 + totalsize 가 최대 캐시 크기 이상이면 delete
-  while (newnode->content_length + p->total_size > MAX_CACHE_SIZE)
+  // 캐시의 최대 크기 > total size + 들어온 값의 크기 면 delete_cache 
+  while (p->total_size + newnode->content_length > MAX_CACHE_SIZE)
   {
     delete_cache(p->tail);
-  } // 아니면 root부터 넣어주기 
-  if (p->root == NULL) {
-    p->root = newnode;
-    p->tail = newnode;
-  } else {
+  }
+  // 초기 값 설정 (값이 들어오면 루트부터 넣기)
+  if (p->root != NULL) {
     p->root->prev = newnode;
     newnode->next = p->root;
     p->root = newnode;
+  } else {
+    p->root = newnode;
+    p->tail = newnode;
   }
-  p->total_size += newnode->content_length;
 }
 
 // 캐시를 조회해서 path를 지닌 캐시를 찾음
@@ -136,30 +136,26 @@ cache_node *find_cache(cache *p, char *path) {
   return NULL;
 };
 
-// 찾은 노드를 변수로 받고, 맨 앞 노드로 이동
-void move_cache(cache_node *node, cache *p) {
-  // 루트노드의 path가 찾는 거랑 같으면 루트노드기 때문에 변경사항 없음
-  if (p->root == node){
-    
-  }
-  // 마지막 노드가 가지고 있는 path가 내가 찾는 path와 같은경우
-  else if(p->tail == node){
-    p->tail->prev->next = NULL;
-    p->tail = node->prev;
-    node->next = p->root;
+// find_cache를 통해서 찾은 노드를 변수로 받고, 맨 앞 노드로 이동(재정렬)
+void add_cache(cache_node *node, cache *p) {
+
+  if (p->root == node) {}   // 찾는 값이 루트에 있으면 변경 사항이 없음
+  else if (p->tail == node) // 찾는 값이 테일에 있으면 루트로 옮김
+  {
+    p->tail->prev->next = NULL; // 연결 끊기
+    p->tail = node->prev; // 꼬리는 노드의 이전것이 됨
+    node->next = p->root; // 노드의 다음 원래 루트
     node->prev = NULL;
     p->root->prev = node;
     p->root = node;
-    
-  }
-  // 링크드 리스트 중간의 노드가 같은경우
-  else{
-    node->next->prev = node->prev;
+  } else {   // 찾는 값이 중간이면 루트로 옮김  
+    // 들어온 노드의 이전과 다음을 서로 연결  
     node->prev->next = node->next;
-    node->next = p->root;
-    p->root->prev = node;
-    node->prev = NULL;
-    p->root = node;
+    node->next->prev = node->prev;
+    node->next = p->root; // 노드의 다음을 원래 루트랑 연결
+    node->prev = NULL; // 들어온 노드의 이전은 널로바꾸면서 루트노드로 변경
+    p->root->prev = node; // 원래 루트였던 이전을 새로들어온 노드로 변경
+    p->root = node; // 들어온 노드가 루트노드가 됨
   }
 }
 
@@ -168,8 +164,8 @@ void delete_cache(cache *p) {
   cache_node *search;
 
   search = p->tail;
+  search->prev->next = NULL; // 연결 끊기
   p->tail = p->tail->prev;
-  search->prev->next = NULL; // 연결끊기
   p->total_size -= search->content_length;
   free(search);
 }
@@ -187,7 +183,7 @@ void doit(int connfd) {
   rio_t rio, server_rio; // 클라용 rio, 서버용 rio (네트워크 통신을 위함)
 
   cache_node *node;
-  char *client_path = (char *)malloc(MAXLINE);
+  char *client_path = (char *)malloc(MAXLINE); // 클라이언트가 찾고자 하는 path를 담은 메모리 영역
   char *response_buf = (char *)malloc(MAX_OBJECT_SIZE);
 
   // 클라이언트 요청 읽기(클라와의 fd를 클라용 rio에 연결)
@@ -207,12 +203,12 @@ void doit(int connfd) {
   // uri를 분석해서 파싱하기(uri,호스트네임,목적지호스트, 포트)
   parse_uri(uri,hostname,path, &port); 
 
-  strcpy(client_path,path);
+  strcpy(client_path,path); 
   // 클라이언트 요청에서 캐싱이 된 건지 확인하기
   node = find_cache(p,client_path);
   // 캐싱된 객체면 클라이언트에게 바로 전송하기
   if (node != NULL) {
-    move_cache(node,p); // 사용된 거 move_cache
+    add_cache(node,p); // 사용된 거 add_cache 로 재정렬
     Rio_writen(connfd,node->response,node->content_length);
     return;
   }
@@ -234,7 +230,6 @@ void doit(int connfd) {
 
   // 서버에 요청 메시지를 보냄 
   Rio_readinitb(&server_rio,end_serverfd);
-  // 헤더 요청 읽을 읽으면서 - 서버에 보낼 요청 헤더 생성
   read_request_header(server_buf, hostname, path, port, &rio); // 클라이언트로부터 받은 요청을 수정하여 전송
   Rio_writen(end_serverfd,server_buf,strlen(server_buf)); // 데이터를 쓸 식별자, 데이터가 저장된 버퍼 주소, 버퍼에서 쓰는 데이터의 바이트 수
 
@@ -242,7 +237,7 @@ void doit(int connfd) {
   size_t n;
   while ((n=Rio_readlineb(&server_rio,server_buf,MAXLINE)) != 0)
   {
-    strcat(response_buf,server_buf);
+    strcat(response_buf,server_buf); // 문자열 끝에 server_buf 응답 연결 (캐시 메모리에 저장하기)
     Rio_writen(connfd,server_buf,n);
   }
 
@@ -255,7 +250,7 @@ void doit(int connfd) {
 void read_request_header(char *http_header, char *hostname, char *path, int port, rio_t *server_rio) {
   char buf[MAXLINE], other_hdr[MAXLINE], host_hdr[MAXLINE];
 
-  sprintf(http_header,requestlint_hdr_format,path); 
+  sprintf(http_header,requestlint_hdr_format,path); // 응답 라인 설정
   while (Rio_readlineb(server_rio,buf,MAXLINE) > 0) // 읽어온 데이터가 존재하는 동안
   {
     if (strcmp(buf,"\r\n") == 0) // 끝까지 다 읽었다면 break
@@ -281,6 +276,7 @@ void read_request_header(char *http_header, char *hostname, char *path, int port
   if (strlen(host_hdr) == 0 ) 
     sprintf(host_hdr,host_hdr_format,hostname);
 
+  // 포맷 문자열을 사용하여 다양한 타입의 데이터를 문자열로 변환하여 지정된 버퍼(http_header)에 저장
   sprintf(http_header, "%s%s%s%s%s%s%s", http_header, host_hdr, conn_hdr, prox_hdr, user_agent_hdr, other_hdr, "\r\n");
   return;
 }
@@ -297,7 +293,7 @@ int connect_endserver(char *hostname, int port){
 // uri를 분석해서 파싱하기
 void parse_uri(char *uri,char *hostname,char *path, int *port)
 {
-    *port = 80; // HTTP 기본 포트 80 (포트가 url에 포함 여부와 관계없이 작동해야함)
+    *port = 80; // HTTP 기본 포트 80 (포트가 url에 포함 여부와 관계없이 작동해야한다는 조건)
 
     char* pos = strstr(uri, "//"); // "//" 의 시작 위치에 대한 포인터를 리턴함
     pos = pos != NULL ? pos+2 : uri; 
